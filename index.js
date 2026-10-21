@@ -53,6 +53,28 @@ const RATE_FILE    = './rate_messages.json';
 const RATE_OVERRIDE_FILE = './rate_overrides.json';   // เรท/ลิมิตที่แก้ผ่านแผง !ratepanel
 
 // ==========================================
+// [ 3.3 STATUS — ประกาศ เปิด/ปิดร้าน ]
+// ==========================================
+const STATUS_CHANNEL_ID   = '1554881839422906494';          // ← ใส่ ID ห้องประกาศสถานะร้าน (ไม่ใส่ = ส่งในห้องที่พิมพ์คำสั่ง และปิดระบบอัตโนมัติ)
+const STATUS_BANNER_OPEN  = 'https://cdn.discordapp.com/attachments/1554881839422906489/1562401209107742780/IMG_9588.gif?ex=6ad9db04&is=6ad88984&hm=e90b0a49d7366d9697082e818f2e81a3c41a190f1cb213d10089b4877c85fc34&';          // ← ลิงก์รูปแบนเนอร์ "เปิดร้าน" (ว่าง = ไม่มีรูป)
+const STATUS_BANNER_CLOSE = 'https://cdn.discordapp.com/attachments/1554881839422906489/1562401209107742780/IMG_9588.gif?ex=6ad9db04&is=6ad88984&hm=e90b0a49d7366d9697082e818f2e81a3c41a190f1cb213d10089b4877c85fc34&';          // ← ลิงก์รูปแบนเนอร์ "ปิดร้าน"
+const STATUS_AUTO         = true;        // true = เปิด/ปิดร้านอัตโนมัติตามเวลาด้านล่าง (ต้องใส่ STATUS_CHANNEL_ID ด้วย)
+const STATUS_OPEN_TIME    = '09:00';     // เวลาเปิดร้าน (เวลาไทย 24 ชม.)
+const STATUS_CLOSE_TIME   = '03:00';     // เวลาปิดร้าน (เวลาไทย)
+const STATUS_FILE         = './status_state.json';
+
+// ปุ่มลิงก์ใต้ประกาศ — ใส่ ID ห้องที่ต้องการให้กดแล้วพาไป (ช่อง channelId ว่าง = ไม่แสดงปุ่มนั้น)
+const STATUS_BUTTONS = [
+    { label: 'เปิด Ticket ซื้อของ', emoji: '✅', channelId: '' },   // ห้องที่มีแผงร้านค้า (!setupshop)
+    { label: 'ดูตัวอย่าง',          emoji: '❓', channelId: '' },
+    { label: 'ดูเรทราคา',           emoji: '📊', channelId: '' }
+];
+
+let statusState = { messageId: null, channelId: null, lastAuto: '' };
+try { if (fs.existsSync(STATUS_FILE)) statusState = { ...statusState, ...JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8')) }; } catch {}
+const saveStatus = () => { try { fs.writeFileSync(STATUS_FILE, JSON.stringify(statusState, null, 2)); } catch (e) { console.error('save status:', e); } };
+
+// ==========================================
 // [ 3.1 BRAND / อีโมจิ / สติกเกอร์ ]
 // ==========================================
 const BRAND = { name: 'COMET NEW', color: '#FFB6C1', accent: '#FF6FAF' };
@@ -1879,6 +1901,8 @@ client.on('messageCreate', async (message) => {
             case '!addstock':       return await cmdStockText(message, args, 'add', command);
             case '!delstock':       return await cmdStockText(message, args, 'sub', command);
             case '!clearallstock':  return await cmdClearStock(message, args);
+            case '!open':           return await cmdStatus(message, true, args);
+            case '!close':          return await cmdStatus(message, false, args);
         }
     } catch (err) {
         console.error('❌ Command Error:', err);
@@ -1920,6 +1944,7 @@ async function cmdHelp(message) {
             { name: '📦 สต็อก',    value: '`!stockpanel` แผงเติม/ลด/ตั้งค่าสต็อก (ใช้ปุ่ม)\n`!addstock [food|buy] [item] [จำนวน]`\n`!delstock [food|buy] [item] [จำนวน]`\n`!clearallstock [food|buy]`' },
             { name: '💲 เรทราคา', value: '`!ratepanel` แผงแก้เรท/ลิมิตสินค้าในดิส (ไม่ต้องแตะโค้ด)' },
             { name: '📢 ประกาศ (Embed)', value: '`!embed` เมนูเลือกหัวข้อ\n`!embed <คีย์ลัด> [#ห้อง]` เช่น `!embed stock #ประกาศ`' },
+            { name: '🟢 สถานะร้าน', value: '`!open` ประกาศเปิดร้าน\n`!close [ข้อความ]` ประกาศปิดร้าน เช่น `!close กลับมา 15:00`\n(ตั้งเวลาเปิด/ปิดอัตโนมัติที่ STATUS_OPEN_TIME / STATUS_CLOSE_TIME)' },
             { name: '🔑 คีย์ลัดประกาศ', value: tpl },
             { name: '🛠️ ออเดอร์', value: 'ในห้องออเดอร์: **รับงาน** → **เสร็จสิ้น** (ตัดสต็อก/คูลดาวน์) → **ปิดห้อง**' }
         )] });
@@ -2094,6 +2119,86 @@ async function cmdClearStock(message, args) {
 }
 
 // ==========================================
+// [ 14.1 STATUS — เปิด/ปิดร้าน ]
+// ==========================================
+function bangkokNow() {
+    const p = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Bangkok', hourCycle: 'h23',
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+    }).formatToParts(new Date());
+    const g = (t) => p.find(x => x.type === t).value;
+    return { date: `${g('year')}-${g('month')}-${g('day')}`, hm: `${g('hour')}:${g('minute')}` };
+}
+
+/** ส่งประกาศสถานะร้าน (ลบอันเก่าออกก่อน ห้องจะมีประกาศล่าสุดอันเดียว) */
+async function postStatus(isOpen, chan, note = '') {
+    const hours = `${STATUS_OPEN_TIME}-${STATUS_CLOSE_TIME}`;
+    const embed = new EmbedBuilder().setColor(isOpen ? '#FF0000' : '#808080');
+    const banner = isOpen ? STATUS_BANNER_OPEN : STATUS_BANNER_CLOSE;
+    if (banner) embed.setImage(banner);
+
+    if (isOpen) {
+        embed.setTitle('🟢 ร้านเปิดให้บริการแล้วครับ')
+            .setDescription(
+                `**เปิด Ticket ซื้อของ หรือ สอบถาม มาได้เลย 🎁**\n` +
+                `> เปิดร้าน ${hours} ของทุกวัน\n> ขอบคุณที่ไว้วางใจและใช้บริการกับทางร้าน 🥰`
+            );
+    } else {
+        embed.setTitle('🔴 ร้านปิดให้บริการชั่วคราวครับ')
+            .setDescription(
+                `**ทิ้งข้อความไว้ได้เลย เปิดร้านแล้วจะรีบตอบนะครับ 🙏**\n` +
+                (note ? `> ${note}\n` : '') +
+                `> เวลาเปิดร้าน ${hours} ของทุกวัน`
+            );
+    }
+
+    const row = new ActionRowBuilder();
+    for (const b of STATUS_BUTTONS) {
+        if (!b.channelId) continue;
+        row.addComponents(new ButtonBuilder()
+            .setLabel(b.label).setEmoji(b.emoji).setStyle(ButtonStyle.Link)
+            .setURL(`https://discord.com/channels/${chan.guild.id}/${b.channelId}`));
+    }
+
+    // ลบประกาศสถานะอันเก่า
+    if (statusState.messageId && statusState.channelId) {
+        const oldCh  = await client.channels.fetch(statusState.channelId).catch(() => null);
+        const oldMsg = oldCh ? await oldCh.messages.fetch(statusState.messageId).catch(() => null) : null;
+        if (oldMsg) await oldMsg.delete().catch(() => {});
+    }
+
+    const sent = await chan.send({ embeds: [embed], components: row.components.length ? [row] : [] });
+    statusState.messageId = sent.id;
+    statusState.channelId = chan.id;
+    saveStatus();
+    return sent;
+}
+
+// !open  /  !close [ข้อความเพิ่มเติม เช่น กลับมา 15:00]
+async function cmdStatus(message, isOpen, args) {
+    const chan = STATUS_CHANNEL_ID ? await client.channels.fetch(STATUS_CHANNEL_ID).catch(() => null) : message.channel;
+    if (!chan) return message.reply('❌ หาห้องประกาศสถานะไม่เจอ ตรวจ `STATUS_CHANNEL_ID` ในโค้ด');
+    await postStatus(isOpen, chan, args.join(' ').trim());
+    return message.reply(`${isOpen ? '🟢 ประกาศเปิดร้านแล้ว' : '🔴 ประกาศปิดร้านแล้ว'} → <#${chan.id}>`);
+}
+
+/** เปิด/ปิดอัตโนมัติตามเวลาไทย (เช็คทุก 30 วิ, กันส่งซ้ำด้วย lastAuto) */
+function startStatusScheduler() {
+    if (!STATUS_AUTO || !STATUS_CHANNEL_ID) return;
+    setInterval(async () => {
+        const { date, hm } = bangkokNow();
+        const isOpen = hm === STATUS_OPEN_TIME ? true : hm === STATUS_CLOSE_TIME ? false : null;
+        if (isOpen === null) return;
+        const stamp = `${date} ${hm}`;
+        if (statusState.lastAuto === stamp) return;
+        statusState.lastAuto = stamp;
+        saveStatus();
+        const chan = await client.channels.fetch(STATUS_CHANNEL_ID).catch(() => null);
+        if (chan) await postStatus(isOpen, chan).catch(e => console.error('❌ Auto status error:', e));
+    }, 30 * 1000);
+}
+
+// ==========================================
 // [ 15. INTERACTION ROUTER ]
 // ==========================================
 client.on('interactionCreate', async (interaction) => {
@@ -2111,6 +2216,7 @@ client.on('interactionCreate', async (interaction) => {
 // ==========================================
 client.once(Events.ClientReady, () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
+    startStatusScheduler();
 
     // ออเดอร์ที่กดเสร็จสิ้นแล้วแต่ยังไม่ครบ 10 นาทีตอนบอทดับ → ตั้งเวลาต่อ (ถ้าเลยเวลาแล้วจะจัดการทันที)
     for (const [channelId, data] of Object.entries(activeTicketData))
