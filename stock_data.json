@@ -1,0 +1,23 @@
+{
+  "buy": {
+    "wire": 0,
+    "cement": 0,
+    "redmoney": 0,
+    "armor": 0,
+    "weapon_card": 0,
+    "selljade": 0,
+    "selljade_shard": 0,
+    "vibe": 0,
+    "vibe_shard": 0,
+    "powerc": 0,
+    "gem": 0
+  },
+  "food": {
+    "set_pork_beef": 0,
+    "set_porksteak_salad": 0,
+    "set_beef_salad": 0,
+    "set_juice_duo": 0,
+    "set_bulk_pork_juice": 0,
+    "set_bulk_steak_pair": 0
+  }
+}

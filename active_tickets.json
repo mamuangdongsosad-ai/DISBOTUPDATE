@@ -1,0 +1,173 @@
+{
+  "1561612058288463912": {
+    "type": "farm",
+    "items": [
+      {
+        "key": "emerald",
+        "label": "มรกต",
+        "emoji": "<:IMG_9488:1560991371064647790>",
+        "rate": 850
+      }
+    ],
+    "amounts": {
+      "emerald": 1
+    },
+    "total": 850,
+    "detail": "🔹 <:IMG_9488:1560991371064647790> มรกต × 1 = **850฿**\n",
+    "ign": "bemmy_wemmy",
+    "phone": "148641",
+    "userId": "1398344538313064541",
+    "pfp": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8CBB6396FD2264C4BD7283D824412D51-Png/420/420/AvatarHeadshot/Png/noFilter",
+    "qNum": 4,
+    "status": "done",
+    "assigneeId": "1205818175464153098",
+    "createdAt": 1792387728469,
+    "mainMsgId": "1561612060175900733"
+  },
+  "1561641655520595978": {
+    "type": "farm",
+    "items": [
+      {
+        "key": "strawberry",
+        "label": "สตรอเบอร์รี่",
+        "emoji": "<:IMG_9491:1560993445227790406>",
+        "rate": 55
+      },
+      {
+        "key": "beef",
+        "label": "เนื้อวัว",
+        "emoji": "<:IMG_9495:1560993413766189116>",
+        "rate": 55
+      }
+    ],
+    "amounts": {
+      "strawberry": 5000,
+      "beef": 5000
+    },
+    "total": 550000,
+    "detail": "🔹 <:IMG_9491:1560993445227790406> สตรอเบอร์รี่ × 5,000 = **275,000฿**\n🔹 <:IMG_9495:1560993413766189116> เนื้อวัว × 5,000 = **275,000฿**\n",
+    "ign": "Wunwai",
+    "phone": "411424",
+    "userId": "899716772960284702",
+    "pfp": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-874BE1048FF83180841C545B56530494-Png/420/420/AvatarHeadshot/Png/noFilter",
+    "qNum": 5,
+    "status": "done",
+    "assigneeId": "699149714658033714",
+    "createdAt": 1792394784953,
+    "mainMsgId": "1561641657944776715"
+  },
+  "1561661971223285761": {
+    "type": "farm",
+    "items": [
+      {
+        "key": "copper",
+        "label": "ทองแดง",
+        "emoji": "<:IMG_9486:1560991623020544000>",
+        "rate": 55
+      }
+    ],
+    "amounts": {
+      "copper": 3500
+    },
+    "total": 192500,
+    "detail": "🔹 <:IMG_9486:1560991623020544000> ทองแดง × 3,500 = **192,500฿**\n",
+    "ign": "MaMuang",
+    "phone": "12345",
+    "userId": "699149714658033714",
+    "pfp": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-7AAABAF6358D8233CB3EAA422AB1F067-Png/420/420/AvatarHeadshot/Png/noFilter",
+    "qNum": 7,
+    "status": "done",
+    "assigneeId": "1042027552576913439",
+    "createdAt": 1792399628744,
+    "mainMsgId": "1561661974448971867"
+  },
+  "1561662318381760558": {
+    "type": "farm",
+    "items": [
+      {
+        "key": "emerald",
+        "label": "มรกต",
+        "emoji": "<:IMG_9488:1560991371064647790>",
+        "rate": 850
+      },
+      {
+        "key": "gold",
+        "label": "ทอง",
+        "emoji": "<:IMG_9501removebgpreview:1561229476090745002>",
+        "rate": 75
+      }
+    ],
+    "amounts": {
+      "emerald": 250,
+      "gold": 1000
+    },
+    "total": 287500,
+    "detail": "🔹 <:IMG_9488:1560991371064647790> มรกต × 250 = **212,500฿**\n🔹 <:IMG_9501removebgpreview:1561229476090745002> ทอง × 1,000 = **75,000฿**\n",
+    "ign": "Simplen3_44",
+    "phone": "186452",
+    "userId": "1497413206862200982",
+    "pfp": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-FCBDAA063944782A0F048DFA6D620B63-Png/420/420/AvatarHeadshot/Png/noFilter",
+    "qNum": 8,
+    "status": "done",
+    "assigneeId": "1042027552576913439",
+    "createdAt": 1792399711393,
+    "mainMsgId": "1561662321150009411"
+  },
+  "1561765684374016115": {
+    "type": "farm",
+    "items": [
+      {
+        "key": "emerald",
+        "label": "มรกต",
+        "emoji": "<:IMG_9488:1560991371064647790>",
+        "rate": 880
+      },
+      {
+        "key": "strawberry",
+        "label": "สตรอเบอร์รี่",
+        "emoji": "<:IMG_9491:1560993445227790406>",
+        "rate": 55
+      }
+    ],
+    "amounts": {
+      "emerald": 250,
+      "strawberry": 5000
+    },
+    "total": 495000,
+    "detail": "🔹 <:IMG_9488:1560991371064647790> มรกต × 250 = **220,000฿**\n🔹 <:IMG_9491:1560993445227790406> สตรอเบอร์รี่ × 5,000 = **275,000฿**\n",
+    "ign": "1234heartless",
+    "phone": "420728",
+    "userId": "1231096884932644904",
+    "pfp": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-01B1A75353E87B715391E57D01EDFF79-Png/420/420/AvatarHeadshot/Png/noFilter",
+    "qNum": 9,
+    "status": "done",
+    "assigneeId": "970874545617653821",
+    "createdAt": 1792424355430,
+    "mainMsgId": "1561765686626488321"
+  },
+  "1562050835368906772": {
+    "type": "farm",
+    "items": [
+      {
+        "key": "emerald",
+        "label": "มรกต",
+        "emoji": "<:IMG_9488:1560991371064647790>",
+        "rate": 880
+      }
+    ],
+    "amounts": {
+      "emerald": 250
+    },
+    "total": 220000,
+    "detail": "🔹 <:IMG_9488:1560991371064647790> มรกต × 250 = **220,000฿**\n",
+    "ign": "bemmy_wemmy",
+    "phone": "148641",
+    "userId": "1398344538313064541",
+    "pfp": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-5D5E2B0FFAE6970121B55F51D3EEF8AD-Png/420/420/AvatarHeadshot/Png/noFilter",
+    "qNum": 10,
+    "status": "accepted",
+    "assigneeId": "892310296629239921",
+    "createdAt": 1792492341130,
+    "mainMsgId": "1562050838224961609"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "food": {
+    "set_pork_beef": {
+      "limit": 1
+    },
+    "set_porksteak_salad": {
+      "limit": 1
+    },
+    "set_beef_salad": {
+      "limit": 1
+    },
+    "set_juice_duo": {
+      "limit": 1
+    },
+    "set_bulk_pork_juice": {
+      "limit": 1
+    }
+  }
+}
