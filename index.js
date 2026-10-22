@@ -63,6 +63,11 @@ const STATUS_OPEN_TIME    = '09:00';     // เวลาเปิดร้าน
 const STATUS_CLOSE_TIME   = '03:00';     // เวลาปิดร้าน (เวลาไทย)
 const STATUS_FILE         = './status_state.json';
 
+// เปลี่ยนชื่อห้องสถานะตอนเปิด/ปิดร้าน (บอทต้องมีสิทธิ์ Manage Channels ที่ห้องนั้น)
+const STATUS_RENAME       = true;
+const STATUS_NAME_OPEN    = '│﹒สถานะร้าน-𝑶𝑷𝑬𝑵🟢';
+const STATUS_NAME_CLOSE   = '│﹒สถานะร้าน-𝑪𝑳𝑶𝑺𝑬🔴';
+
 // ปุ่มลิงก์ใต้ประกาศ — ใส่ ID ห้องที่ต้องการให้กดแล้วพาไป (ช่อง channelId ว่าง = ไม่แสดงปุ่มนั้น)
 const STATUS_BUTTONS = [
     { label: 'เปิด Ticket ซื้อของ', emoji: '✅', channelId: '' },   // ห้องที่มีแผงร้านค้า (!setupshop)
@@ -70,7 +75,8 @@ const STATUS_BUTTONS = [
     { label: 'ดูเรทราคา',           emoji: '📊', channelId: '' }
 ];
 
-let statusState = { messageId: null, channelId: null, lastAuto: '' };
+// sched = สถานะตามเวลาที่ระบบอัตโนมัติประกาศล่าสุด (true = เปิด / false = ปิด / null = ยังไม่เคยประกาศ)
+let statusState = { messageId: null, channelId: null, sched: null };
 try { if (fs.existsSync(STATUS_FILE)) statusState = { ...statusState, ...JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8')) }; } catch {}
 const saveStatus = () => { try { fs.writeFileSync(STATUS_FILE, JSON.stringify(statusState, null, 2)); } catch (e) { console.error('save status:', e); } };
 
@@ -164,17 +170,17 @@ const RATE_EMOJI = {
         wood: '<:IMG_9489:1560991683317858304>' // ไม้
     },
     food: {
-        applejuice: '<:emoji_55:1560922089244860476>', // น้ำแอปเปิ้ล
-        strawberryjuice: '<:emoji_561:1560922072450990110>', // น้ำสตรอเบอร์รี่
-        porksteak: '<:emoji_521:1560922121956360283>', // สเต็กหมู
-        beefsteak: '<:IMG_9510removebgpreview:1561234155268997211>', // สเต็กวัว
-        salad: '<:emoji_54:1560922105745252352>',  // สลัด,
-        set_pork_beef: '<:emoji_521:1560922121956360283>+<:IMG_9510removebgpreview:1561234155268997211>',           // สเต็กหมู + สเต็กเนื้อวัว
-        set_porksteak_salad: '<:emoji_521:1560922121956360283>+<:emoji_54:1560922105745252352>',     // สเต็กเนื้อหมู + สลัดผัก
-        set_beef_salad: '<:IMG_9510removebgpreview:1561234155268997211>+<:emoji_54:1560922105745252352>',          // สเต็กเนื้อวัว + สลัดผัก
-        set_juice_duo: '<:emoji_561:1560922072450990110>+<:emoji_55:1560922089244860476>',           // น้ำสตรอเบอร์รี่ + น้ำแอปเปิ้ล
-        set_bulk_pork_juice: '<:IMG_9494:1560993524625707058>+<:emoji_55:1560922089244860476>',     // เนื้อหมู + น้ำแอปเปิ้ล
-        set_bulk_steak_pair: '<:emoji_521:1560922121956360283>+<:IMG_9510removebgpreview:1561234155268997211>',     // สเต็กหมู + สเต็กวัว (Set 50)
+        applejuice: '<:emoji_55:1560922089244860476>',                       // น้ำแอปเปิ้ล
+        strawberryjuice: '<:emoji_561:1560922072450990110>',                 // น้ำสตรอเบอร์รี่
+        porksteak: '<:emoji_521:1560922121956360283>',                       // สเต็กหมู
+        beefsteak: '<:IMG_9510removebgpreview:1561234155268997211>',         // สเต็กวัว
+        salad: '<:emoji_54:1560922105745252352>',                            // สลัด
+        // เซ็ท (อีโมจิ 2 อันต่อกัน) — key ตรงกับ CATALOG.food
+        set_beef_strawberry:  '<:IMG_9510removebgpreview:1561234155268997211>+<:emoji_561:1560922072450990110>',   // สเต็กวัว + น้ำสตรอเบอร์รี่
+        set_beef_apple:       '<:IMG_9510removebgpreview:1561234155268997211>+<:emoji_55:1560922089244860476>',     // สเต็กวัว + น้ำแอปเปิ้ล
+        set_beef_pork:        '<:IMG_9510removebgpreview:1561234155268997211>+<:emoji_521:1560922121956360283>',    // สเต็กวัว + สเต็กหมู
+        set_pork_salad:       '<:emoji_521:1560922121956360283>+<:emoji_54:1560922105745252352>',                   // สเต็กหมู + สลัด
+        set_apple_strawberry: '<:emoji_55:1560922089244860476>+<:emoji_561:1560922072450990110>'                    // น้ำแอปเปิ้ล + น้ำสตรอเบอร์รี่
     }
 };
 
@@ -251,13 +257,21 @@ const CATALOG = {
         maxSelect: 5, cooldown: 5 * 60 * 60 * 1000, cooldownLog: '1561039811194921122', trackStock: true,
         rateChannel: '1561039647373791354', stockLog: STOCK_FOOD_LOG, stockColor: '#FFB6C1',
         items: {
-            // เซ็ทอาหาร (ไม่ขายแยก) — rate = ราคาต่อเซ็ท, limit = จำกัดต่อรอบ, stock = จำนวนเซ็ทที่มี
-            set_pork_beef:        { label: 'สเต็กหมู 10 + สเต็กเนื้อวัว 10', rate: 35000,  limit: 10, stock: 0 },
-            set_porksteak_salad:  { label: 'สเต็กเนื้อหมู 10 + สลัดผัก 10',  rate: 26000,  limit: 9,  stock: 0  },
-            set_beef_salad:       { label: 'สเต็กเนื้อวัว 10 + สลัดผัก 10',  rate: 25000,  limit: 11, stock: 0 },
-            set_juice_duo:        { label: 'น้ำสตรอเบอร์รี่ 10 + น้ำแอปเปิ้ล 10', rate: 19000, limit: 31, stock: 0 },
-            set_bulk_pork_juice:  { label: 'เนื้อหมู 50 + น้ำแอปเปิ้ล 50 (Set 50 จาน/แก้ว)', rate: 98000,  limit: 15, stock: 0 },
-            set_bulk_steak_pair:  { label: 'สเต็กหมู 50 + สเต็กวัว 50 (Set 50 จาน/แก้ว)', rate: 180000, limit: 19, stock: 0 }
+            // ── เซ็ท (ตรงกับหน้าเรท) ──
+            // rate = ราคาต่อเซ็ท | limit = สั่งเซ็ทได้รวมกี่เซ็ทต่อออเดอร์ | stock = จำนวนเซ็ทที่มี
+            // parts = สินค้าในเซ็ท (ใช้สร้างหน้าเรทอัตโนมัติ — key ต้องตรงกับ RATE_PAGE.foodNames)
+            set_beef_strawberry:  { label: 'SET สเต็กวัว + น้ำสตรอเบอร์รี่',   rate: 45000, limit: 2, stock: 0, unit: 'เซ็ท', parts: ['beefsteak', 'strawberryjuice'] },
+            set_beef_apple:       { label: 'SET สเต็กวัว + น้ำแอปเปิ้ล',       rate: 45000, limit: 2, stock: 0, unit: 'เซ็ท', parts: ['beefsteak', 'applejuice'] },
+            set_beef_pork:        { label: 'SET สเต็กวัว + สเต็กหมู',           rate: 50000, limit: 2, stock: 0, unit: 'เซ็ท', parts: ['beefsteak', 'porksteak'] },
+            set_pork_salad:       { label: 'SET สเต็กหมู + สลัด',               rate: 25000, limit: 2, stock: 0, unit: 'เซ็ท', parts: ['porksteak', 'salad'] },
+            set_apple_strawberry: { label: 'SET น้ำแอปเปิ้ล + น้ำสตรอเบอร์รี่',  rate: 20000, limit: 2, stock: 0, unit: 'เซ็ท', parts: ['applejuice', 'strawberryjuice'] },
+
+            // ── ขายแยก ── rate = ราคาต่อชิ้น | stock = จำนวนชิ้นที่มี
+            porksteak:       { label: 'สเต็กหมู',        rate: 2600, stock: 0 },
+            beefsteak:       { label: 'สเต็กวัว',        rate: 2700, stock: 0 },
+            salad:           { label: 'สลัด',            rate: 1200, stock: 0 },
+            applejuice:      { label: 'น้ำแอปเปิ้ล',     rate: 1100, stock: 0 },
+            strawberryjuice: { label: 'น้ำสตรอเบอร์รี่',  rate: 1100, stock: 0 }
         }
     }
 };
@@ -459,7 +473,7 @@ function rateLines(type, detail = false) {
 // [ 6.1 หน้าเรทแบบข้อความ — ฟาร์ม (งานขาว + งานแร่) / อาหาร ]
 // ==========================================
 // หน้าเรทของ farm และ food โพสต์เป็น "ข้อความธรรมดา" (ไม่ใช่ embed) เพื่อให้หัวข้อ # / ## และอีโมจิขยับแสดงผลได้
-// ฟาร์ม: ราคา/ลิมิตอ่านจาก CATALOG.farm (แก้ผ่าน !ratepanel ได้) | อาหาร: แก้ราคาในลิสต์ foodSets / foodSingles ด้านล่าง
+// ฟาร์ม: ราคา/ลิมิตอ่านจาก CATALOG.farm | อาหาร: รายการ/ราคา/ลิมิตอ่านจาก CATALOG.food (แก้ผ่าน !ratepanel ได้ทั้งคู่)
 const RATE_PAGE = {
     arrow:    '<a:1427603143377551381:1561657371288150086>',
     title:    '<a:936387643124633681:1561005752028635237>',
@@ -476,26 +490,12 @@ const RATE_PAGE = {
     oreKeys:  ['copper', 'stone', 'iron', 'gold', 'diamond', 'ruby', 'emerald','gunpowder'],   // ที่เหลือใน CATALOG.farm = งานขาว
     fallbackEmoji: { radish: '🫜' },          // ใช้เมื่อ RATE_EMOJI.farm ของสินค้านั้นว่าง
 
-    // ── อาหาร ──
+    // ── อาหาร ── (รายการ/ราคา/ลิมิตอ่านจาก CATALOG.food)
     readRoomChannelId: '1561039310336303114', // ห้องที่ให้อ่านก่อนสั่งอาหาร
-    foodNames: {                              // key = key ใน RATE_EMOJI.food
+    foodNames: {                              // ชื่อที่โชว์ในหน้าเรท | key = key ใน RATE_EMOJI.food (และ parts ของเซ็ท)
         beefsteak: 'เสต็กวัว', porksteak: 'เสต็กหมู', salad: 'สลัด',
         applejuice: 'น้ำแอปเปิ้ล', strawberryjuice: 'น้ำสตอเบอรี่'
-    },
-    foodSets: [                               // [สินค้า 1, สินค้า 2, ราคาเซ็ท]
-        ['beefsteak',       'strawberryjuice', '45 K'],
-        ['beefsteak',       'applejuice',      '45 K'],
-        ['beefsteak',       'porksteak',       '50 K'],
-        ['porksteak',       'salad',           '25 K'],
-        ['applejuice',      'strawberryjuice', '20 K']
-    ],
-    foodSingles: [                            // [สินค้า, ราคา/ชิ้น]
-        ['porksteak',       '2,600'],
-        ['beefsteak',       '2,700'],
-        ['salad',           '1,200'],
-        ['applejuice',      '1,100'],
-        ['strawberryjuice', '1,100']
-    ]
+    }
 };
 
 const fmtK = (v) => {
@@ -546,23 +546,27 @@ function buildFarmRatePages() {
     ];
 }
 
-/** หน้าเรทอาหาร: เซ็ท + ขายแยก */
+/** หน้าเรทอาหาร: เซ็ท + ขายแยก (อ่านจาก CATALOG.food — ตรงกับเมนูสั่งซื้อเสมอ) */
 function buildFoodRatePages() {
-    const P = RATE_PAGE, A = P.arrow, E = RATE_EMOJI.food;
-    const nm = (k) => `${P.foodNames[k]}${E[k] || ''}`;
+    const P = RATE_PAGE, A = P.arrow, E = RATE_EMOJI.food, cat = CATALOG.food;
+    const nm      = (k) => `${P.foodNames[k] || cat.items[k]?.label || k}${E[k] || ''}`;
+    const sets    = Object.values(cat.items).filter(it => it.parts);
+    const singles = Object.entries(cat.items).filter(([, it]) => !it.parts);
+    const setCap  = Math.max(0, ...sets.map(it => it.limit || 0));
+    const kSet    = (v) => (v % 1000 === 0 ? `${v / 1000} K` : fmt(v));
 
     return [
         ...packBlocks([
             `# ${P.title} เรทอาหาร`,
             `## ${P.sparkle} อาหารมีขายแยกน้าา ${P.sparkle}`,
             `# ${P.hearts} FOOD SET`,
-            ...P.foodSets.map(([a, b, price]) => `**${A} SET FOOD ${nm(a)} + ${nm(b)} ${A} (${price})**`),
-            `# ${P.warn} ลิมิตเต็มตัวแบบเซ็ท สั่งได้สองเซ็ท คลูดาวน์ 5ชม.นะคะ ${P.warn}`
+            ...sets.map(it => `**${A} SET FOOD ${it.parts.map(k => nm(k)).join(' + ')} ${A} (${kSet(it.rate)})**`),
+            `# ${P.warn} ลิมิตเต็มตัวแบบเซ็ท${setCap ? ` สั่งได้ ${setCap} เซ็ท` : ''} คลูดาวน์ ${fmtDuration(cat.cooldown)} นะคะ ${P.warn}`
         ]),
         ...packBlocks([
             `${P.divider2}\n# ${A} FOOD ขายแยก`,
-            ...P.foodSingles.map(([k, price]) => `**${A} ${nm(k)}** **${A} (${price}/ชิ้น)**`),
-            `# ${P.warn} แบบแยกลิมิตเต็มตัว สั่งได้สูงสุด 5 อย่างนะคะ ${P.warn}`,
+            ...singles.map(([k, it]) => `**${A} ${nm(k)}** **${A} (${fmt(it.rate)}/ชิ้น)**`),
+            `# ${P.warn} แบบแยกลิมิตเต็มตัว สั่งได้สูงสุด ${cat.maxSelect} อย่างนะคะ ${P.warn}`,
             `## ${P.sparkle} รบกวนอ่านห้องนี้ก่อนสั่งอาหารนะคะ ${P.sparkle}\n<#${P.readRoomChannelId}>`
         ])
     ];
@@ -848,7 +852,7 @@ async function handleShopFlow(interaction) {
 
         for (const [key, item] of entries) {
             const out   = cat.trackStock && item.stock <= 0;
-            const parts = [`💰 ${fmt(item.rate)} / ชิ้น`];
+            const parts = [`💰 ${fmt(item.rate)} / ${item.unit || 'ชิ้น'}`];
             if (item.limit)      parts.push(`ลิมิต: ${fmt(item.limit)}`);
             if (cat.trackStock)  parts.push(`📦 ${fmt(item.stock)}`);
             select.addOptions({
@@ -1037,6 +1041,15 @@ async function handleShopFlow(interaction) {
                     `❌ **เกินลิมิตต่อรอบ**\n` +
                     over.map(i => `• ${itemName(i)}: สั่ง ${fmt(amounts[i.key])} (สูงสุด ${fmt(cat.items[i.key].limit)})`).join('\n') +
                     `\n\nกดปุ่ม **NEXT / แก้ไขจำนวน** เพื่อกรอกใหม่อีกครั้ง`);
+                return true;
+            }
+
+            // เซ็ทอาหาร: รวมทุกเซ็ทในออเดอร์เดียวต้องไม่เกินลิมิต
+            const setCap = Math.max(0, ...Object.values(cat.items).filter(it => it.parts).map(it => it.limit || 0));
+            const setQty = flow.items.reduce((s, i) => s + (cat.items[i.key]?.parts ? amounts[i.key] : 0), 0);
+            if (setCap && setQty > setCap) {
+                await tell(interaction,
+                    `❌ **เซ็ทอาหารสั่งได้รวมไม่เกิน ${setCap} เซ็ท/ออเดอร์** (ตอนนี้สั่ง ${setQty} เซ็ท)\n\nกดปุ่ม **NEXT / แก้ไขจำนวน** เพื่อกรอกใหม่อีกครั้ง`);
                 return true;
             }
         }
@@ -2121,16 +2134,22 @@ async function cmdClearStock(message, args) {
 // ==========================================
 // [ 14.1 STATUS — เปิด/ปิดร้าน ]
 // ==========================================
+/** เวลาไทยตอนนี้ (UTC+7 ไม่มี DST — ไม่พึ่ง Intl/timezone ของเครื่อง) */
 function bangkokNow() {
-    const p = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Bangkok', hourCycle: 'h23',
-        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-    }).formatToParts(new Date());
-    const g = (t) => p.find(x => x.type === t).value;
-    return { date: `${g('year')}-${g('month')}-${g('day')}`, hm: `${g('hour')}:${g('minute')}` };
+    const d  = new Date(Date.now() + 7 * 3600_000);
+    const hm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    return { date: d.toISOString().slice(0, 10), hm };
 }
 
-/** ส่งประกาศสถานะร้าน (ลบอันเก่าออกก่อน ห้องจะมีประกาศล่าสุดอันเดียว) */
+const toMinutes = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + m; };
+
+/** ตอนนี้ (เวลาไทย) ร้านควรเปิดอยู่ไหม — รองรับช่วงข้ามเที่ยงคืน เช่น 09:00 → 03:00 */
+function shouldBeOpen(hm = bangkokNow().hm) {
+    const now = toMinutes(hm), open = toMinutes(STATUS_OPEN_TIME), close = toMinutes(STATUS_CLOSE_TIME);
+    return open < close ? (now >= open && now < close) : (now >= open || now < close);
+}
+
+/** ส่งประกาศสถานะร้าน (ลบอันเก่าออกก่อน ห้องจะมีประกาศล่าสุดอันเดียว) + เปลี่ยนชื่อห้องสถานะ */
 async function postStatus(isOpen, chan, note = '') {
     const hours = `${STATUS_OPEN_TIME}-${STATUS_CLOSE_TIME}`;
     const embed = new EmbedBuilder().setColor(isOpen ? '#FF0000' : '#808080');
@@ -2171,6 +2190,14 @@ async function postStatus(isOpen, chan, note = '') {
     statusState.messageId = sent.id;
     statusState.channelId = chan.id;
     saveStatus();
+
+    // เปลี่ยนชื่อห้องสถานะตาม เปิด/ปิด (ดิสจำกัดเปลี่ยนชื่อห้อง 2 ครั้ง/10 นาที เลยไม่ await กันประกาศค้าง)
+    if (STATUS_RENAME && STATUS_CHANNEL_ID && chan.id === STATUS_CHANNEL_ID) {
+        const name = isOpen ? STATUS_NAME_OPEN : STATUS_NAME_CLOSE;
+        if (chan.name !== name)
+            chan.setName(name, isOpen ? 'เปิดร้าน' : 'ปิดร้าน')
+                .catch(e => console.error('❌ เปลี่ยนชื่อห้องสถานะไม่ได้ (ตรวจสิทธิ์ Manage Channels):', e.message));
+    }
     return sent;
 }
 
@@ -2182,20 +2209,37 @@ async function cmdStatus(message, isOpen, args) {
     return message.reply(`${isOpen ? '🟢 ประกาศเปิดร้านแล้ว' : '🔴 ประกาศปิดร้านแล้ว'} → <#${chan.id}>`);
 }
 
-/** เปิด/ปิดอัตโนมัติตามเวลาไทย (เช็คทุก 30 วิ, กันส่งซ้ำด้วย lastAuto) */
-function startStatusScheduler() {
-    if (!STATUS_AUTO || !STATUS_CHANNEL_ID) return;
-    setInterval(async () => {
-        const { date, hm } = bangkokNow();
-        const isOpen = hm === STATUS_OPEN_TIME ? true : hm === STATUS_CLOSE_TIME ? false : null;
-        if (isOpen === null) return;
-        const stamp = `${date} ${hm}`;
-        if (statusState.lastAuto === stamp) return;
-        statusState.lastAuto = stamp;
-        saveStatus();
+/**
+ * เปิด/ปิดอัตโนมัติ: เทียบ "สถานะที่ควรเป็นตอนนี้ (ตามเวลาไทย)" กับ "สถานะที่ประกาศอัตโนมัติล่าสุด"
+ * ถ้าไม่ตรงกัน → ประกาศ (ตามทันเองหลังบอทดับ / ส่งพลาดจะลองใหม่ทุก 30 วิ)
+ * !open / !close ที่พิมพ์เองจะคงอยู่จนถึงเวลาเปลี่ยนรอบถัดไป
+ */
+let statusBusy = false;
+async function statusTick() {
+    if (statusBusy) return;
+    const want = shouldBeOpen();
+    if (statusState.sched === want) return;            // ช่วงเวลานี้ประกาศไปแล้ว
+
+    statusBusy = true;
+    try {
         const chan = await client.channels.fetch(STATUS_CHANNEL_ID).catch(() => null);
-        if (chan) await postStatus(isOpen, chan).catch(e => console.error('❌ Auto status error:', e));
-    }, 30 * 1000);
+        if (!chan) { console.error('❌ Auto status: หาห้อง STATUS_CHANNEL_ID ไม่เจอ'); return; }
+        await postStatus(want, chan);
+        statusState.sched = want;                      // จดหลังส่งสำเร็จเท่านั้น (พลาดแล้วจะลองใหม่เอง)
+        saveStatus();
+        console.log(`🕒 Auto status: ประกาศ${want ? 'เปิด' : 'ปิด'}ร้านแล้ว`);
+    } catch (e) {
+        console.error('❌ Auto status error:', e);
+    } finally {
+        statusBusy = false;
+    }
+}
+
+function startStatusScheduler() {
+    if (!STATUS_AUTO)       return console.log('ℹ️ Auto status: ปิดอยู่ (STATUS_AUTO = false)');
+    if (!STATUS_CHANNEL_ID) return console.log('⚠️ Auto status: ต้องใส่ STATUS_CHANNEL_ID ก่อนถึงจะออโต้ได้');
+    statusTick();                                      // เช็กทันทีตอนบอทเปิด
+    setInterval(statusTick, 30 * 1000);
 }
 
 // ==========================================
