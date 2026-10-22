@@ -2153,6 +2153,39 @@ function shouldBeOpen(hm = bangkokNow().hm) {
     return open < close ? (now >= open && now < close) : (now >= open || now < close);
 }
 
+/** แปลง embed สถานะเป็นกล่อง Components V2 — รูปใหญ่บนสุด, หัวข้อใหญ่, ปุ่มอยู่ในกล่องใต้เส้นคั่น */
+function buildStatusMessage(embed, banner, row) {
+    const D = require('discord.js');
+    const hasButtons = row.components.length > 0;
+    const hasV2 = D.ContainerBuilder && D.MediaGalleryBuilder && D.MediaGalleryItemBuilder
+        && D.TextDisplayBuilder && D.SeparatorBuilder && D.MessageFlags && D.MessageFlags.IsComponentsV2;
+    if (!hasV2) return { embeds: [embed], components: hasButtons ? [row] : [] };   // discord.js เก่าไป → ใช้ embed เดิม
+
+    // บรรทัดแรก (ตัวหนา) ทำเป็นหัวข้อรอง ที่เหลือเป็นข้อความตัวเล็ก
+    const [first, ...rest] = String(embed.data.description || '').split('\n');
+    const headline = first.replace(/\*\*/g, '').trim();
+    const body = rest.join('\n').trim();
+
+    const sep = () => new D.SeparatorBuilder().setDivider(true).setSpacing(D.SeparatorSpacingSize.Small);
+    const container = new D.ContainerBuilder();
+    if (embed.data.color != null) container.setAccentColor(embed.data.color);
+
+    if (banner) {
+        container.addMediaGalleryComponents(
+            new D.MediaGalleryBuilder().addItems(new D.MediaGalleryItemBuilder().setURL(banner))
+        );
+    }
+    container.addSeparatorComponents(sep());
+    container.addTextDisplayComponents(
+        new D.TextDisplayBuilder().setContent(`## ${embed.data.title}\n### ${headline}${body ? `\n${body}` : ''}`)
+    );
+    if (hasButtons) {
+        container.addSeparatorComponents(sep());
+        container.addActionRowComponents(row);
+    }
+    return { components: [container], flags: D.MessageFlags.IsComponentsV2 };
+}
+
 /** ส่งประกาศสถานะร้าน (ลบอันเก่าออกก่อน ห้องจะมีประกาศล่าสุดอันเดียว) + เปลี่ยนชื่อห้องสถานะ */
 async function postStatus(isOpen, chan, note = '') {
     const hours = `${STATUS_OPEN_TIME}-${STATUS_CLOSE_TIME}`;
@@ -2190,7 +2223,7 @@ for (const b of STATUS_BUTTONS) {
         if (oldMsg) await oldMsg.delete().catch(() => {});
     }
 
-    const sent = await chan.send({ embeds: [embed], components: row.components.length ? [row] : [] });
+    const sent = await chan.send(buildStatusMessage(embed, banner, row));
     statusState.messageId = sent.id;
     statusState.channelId = chan.id;
     saveStatus();
