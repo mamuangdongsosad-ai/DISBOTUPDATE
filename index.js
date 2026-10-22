@@ -21,6 +21,8 @@ const {
 
 const fs    = require('fs');
 const axios = require('axios');
+const { URL } = require('url');
+const { url } = require('inspector');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
@@ -56,11 +58,13 @@ const RATE_OVERRIDE_FILE = './rate_overrides.json';   // เรท/ลิมิ�
 // [ 3.3 STATUS — ประกาศ เปิด/ปิดร้าน ]
 // ==========================================
 const STATUS_CHANNEL_ID   = '1554881839422906494';          // ← ใส่ ID ห้องประกาศสถานะร้าน (ไม่ใส่ = ส่งในห้องที่พิมพ์คำสั่ง และปิดระบบอัตโนมัติ)
-const STATUS_BANNER_OPEN  = 'https://cdn.discordapp.com/attachments/1554881839422906489/1562401209107742780/IMG_9588.gif?ex=6ad9db04&is=6ad88984&hm=e90b0a49d7366d9697082e818f2e81a3c41a190f1cb213d10089b4877c85fc34&';          // ← ลิงก์รูปแบนเนอร์ "เปิดร้าน" (ว่าง = ไม่มีรูป)
-const STATUS_BANNER_CLOSE = 'https://cdn.discordapp.com/attachments/1554881839422906489/1562401209107742780/IMG_9588.gif?ex=6ad9db04&is=6ad88984&hm=e90b0a49d7366d9697082e818f2e81a3c41a190f1cb213d10089b4877c85fc34&';          // ← ลิงก์รูปแบนเนอร์ "ปิดร้าน"
+const STATUS_BANNER_OPEN  = 'https://cdn.discordapp.com/attachments/1558800783133249708/1562512859433533595/IMG_9599.gif?ex=6ada42ff&is=6ad8f17f&hm=2ff2541a53821a6eefc5d0a93e45fc6f3a4246e9dce73ab9ccddeb7fb5050694&';          // ← ลิงก์รูปแบนเนอร์ "เปิดร้าน" (ว่าง = ไม่มีรูป)
+const STATUS_BANNER_CLOSE = 'https://cdn.discordapp.com/attachments/1558800783133249708/1562512859018301500/IMG_9600.gif?ex=6ada42ff&is=6ad8f17f&hm=d04988008e0ccbedad9b1b485d3f790fb06dd04c5e8575dd26bf1a2daedd9239&';          // ← ลิงก์รูปแบนเนอร์ "ปิดร้าน"
 const STATUS_AUTO         = true;        // true = เปิด/ปิดร้านอัตโนมัติตามเวลาด้านล่าง (ต้องใส่ STATUS_CHANNEL_ID ด้วย)
 const STATUS_OPEN_TIME    = '09:00';     // เวลาเปิดร้าน (เวลาไทย 24 ชม.)
-const STATUS_CLOSE_TIME   = '03:00';     // เวลาปิดร้าน (เวลาไทย)
+const STATUS_CLOSE_TIME   = '00:30';     // เวลาปิดร้าน (เวลาไทย)
+const STATUS_COLOR_OPEN  = '#00FF66';   // สีเส้นข้าง embed ตอนร้านเปิด
+const STATUS_COLOR_CLOSE = '#FF3B3B';   // สีเส้นข้าง embed ตอนร้านปิด
 const STATUS_FILE         = './status_state.json';
 
 // เปลี่ยนชื่อห้องสถานะตอนเปิด/ปิดร้าน (บอทต้องมีสิทธิ์ Manage Channels ที่ห้องนั้น)
@@ -70,9 +74,9 @@ const STATUS_NAME_CLOSE   = '│﹒สถานะร้าน-𝑪𝑳𝑶𝑺�
 
 // ปุ่มลิงก์ใต้ประกาศ — ใส่ ID ห้องที่ต้องการให้กดแล้วพาไป (ช่อง channelId ว่าง = ไม่แสดงปุ่มนั้น)
 const STATUS_BUTTONS = [
-    { label: 'เปิด Ticket ซื้อของ', emoji: '✅', channelId: '' },   // ห้องที่มีแผงร้านค้า (!setupshop)
-    { label: 'ดูตัวอย่าง',          emoji: '❓', channelId: '' },
-    { label: 'ดูเรทราคา',           emoji: '📊', channelId: '' }
+    { label: 'เปิด Ticket ซื้อของ', emoji: '<a:1271420570311069759:1562679699489034331> ', channelId: '1554881839422906496' },   // ห้องที่มีแผงร้านค้า (!setupshop)
+    { label: 'ดูตัวอย่าง',          emoji: '<a:1439855196799766681:1562681121278263326> ', url: 'https://discord.com/shop' },
+    { label: 'ดูเรทราคา',           emoji: '<a:nitroboost:1557406666482384940> ', channelId: '1554881839422906497' }
 ];
 
 // sched = สถานะตามเวลาที่ระบบอัตโนมัติประกาศล่าสุด (true = เปิด / false = ปิด / null = ยังไม่เคยประกาศ)
@@ -2152,18 +2156,18 @@ function shouldBeOpen(hm = bangkokNow().hm) {
 /** ส่งประกาศสถานะร้าน (ลบอันเก่าออกก่อน ห้องจะมีประกาศล่าสุดอันเดียว) + เปลี่ยนชื่อห้องสถานะ */
 async function postStatus(isOpen, chan, note = '') {
     const hours = `${STATUS_OPEN_TIME}-${STATUS_CLOSE_TIME}`;
-    const embed = new EmbedBuilder().setColor(isOpen ? '#FF0000' : '#808080');
+    const embed = new EmbedBuilder().setColor(isOpen ? STATUS_COLOR_OPEN : STATUS_COLOR_CLOSE);
     const banner = isOpen ? STATUS_BANNER_OPEN : STATUS_BANNER_CLOSE;
     if (banner) embed.setImage(banner);
 
     if (isOpen) {
-        embed.setTitle('🟢 ร้านเปิดให้บริการแล้วครับ')
+        embed.setTitle('<a:1494640282170556607:1562510690780975134>  ร้านเปิดให้บริการแล้วครับ')
             .setDescription(
                 `**เปิด Ticket ซื้อของ หรือ สอบถาม มาได้เลย 🎁**\n` +
                 `> เปิดร้าน ${hours} ของทุกวัน\n> ขอบคุณที่ไว้วางใจและใช้บริการกับทางร้าน 🥰`
             );
     } else {
-        embed.setTitle('🔴 ร้านปิดให้บริการชั่วคราวครับ')
+        embed.setTitle('<a:1494640238822428702:1562510708246061188>  ร้านปิดให้บริการชั่วคราวครับ')
             .setDescription(
                 `**ทิ้งข้อความไว้ได้เลย เปิดร้านแล้วจะรีบตอบนะครับ 🙏**\n` +
                 (note ? `> ${note}\n` : '') +
@@ -2172,12 +2176,12 @@ async function postStatus(isOpen, chan, note = '') {
     }
 
     const row = new ActionRowBuilder();
-    for (const b of STATUS_BUTTONS) {
-        if (!b.channelId) continue;
-        row.addComponents(new ButtonBuilder()
-            .setLabel(b.label).setEmoji(b.emoji).setStyle(ButtonStyle.Link)
-            .setURL(`https://discord.com/channels/${chan.guild.id}/${b.channelId}`));
-    }
+for (const b of STATUS_BUTTONS) {
+    if (!b.channelId && !b.url) continue;   // ไม่มีทั้งห้องและลิงก์ = ไม่แสดงปุ่ม
+    row.addComponents(new ButtonBuilder()
+        .setLabel(b.label).setEmoji(b.emoji).setStyle(ButtonStyle.Link)
+        .setURL(b.url || `https://discord.com/channels/${chan.guild.id}/${b.channelId}`));
+}
 
     // ลบประกาศสถานะอันเก่า
     if (statusState.messageId && statusState.channelId) {
