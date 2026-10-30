@@ -1695,7 +1695,7 @@ function createDraft(ownerId, key, vars = {}, channelId = null) {
         title: t.title, description: t.description, color: t.color,
         image: '', footer: `${BRAND.name} • ประกาศ`,
         ping: 'none', channelId, vars,
-        link: null          // ปุ่มลิงก์ใต้ประกาศ { label, emoji, url }  (null = ไม่มีปุ่ม)
+        linkRows: []        // ปุ่มลิงก์ใต้ประกาศ: [[{label,emoji,url}, ...แถวละไม่เกิน 5], ...ไม่เกิน 5 แถว]
     };
     embedDrafts.set(ownerId, draft);
     return draft;
@@ -1731,35 +1731,79 @@ function resolveLinkTarget(raw, guildId) {
     return id && guildId ? `https://discord.com/channels/${guildId}/${id}` : null;
 }
 
-/** แถวปุ่มลิงก์ใต้ประกาศ (กดแล้วเด้งไปหน้านั้น) — ไม่มีปุ่ม = null */
-function buildLinkRow(draft) {
-    const l = draft?.link;
-    if (!l?.url || (!l.label && !l.emoji)) return null;
-    const btn = new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(l.url);
-    if (l.label) btn.setLabel(l.label.slice(0, 80));
-    const em = parseBtnEmoji(l.emoji);
-    if (em) btn.setEmoji(em);
-    return new ActionRowBuilder().addComponents(btn);
+const LINK_PER_ROW = 5, LINK_MAX_ROWS = 5;   // ข้อจำกัดของดิสคอร์ด: 1 ข้อความมีได้ 5 แถว × 5 ปุ่ม = 25 ปุ่ม
+
+/** แยกอีโมจิที่ขึ้นต้นบรรทัดออกจากชื่อปุ่ม: '🎫 เปิด Ticket' → { emoji:'🎫', label:'เปิด Ticket' } */
+function splitLeadingEmoji(text) {
+    const t = String(text ?? '').trim();
+    const m = /^(<a?:\w+:\d+>|\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*)\s*/u.exec(t);
+    return m ? { emoji: m[1], label: t.slice(m[0].length).trim() } : { emoji: '', label: t };
+}
+
+/**
+ * อ่านข้อความจากหน้า "ปุ่มลิงก์" → แถวปุ่ม
+ *   1 บรรทัด = 1 ปุ่ม  รูปแบบ  [อีโมจิ] ชื่อปุ่ม | ลิงก์หรือไอดีห้อง
+ *   เว้นบรรทัดว่าง = ขึ้นแถวใหม่ (ไม่เว้น = เรียงแถวละ 5 ปุ่มอัตโนมัติ)
+ * คืน { rows, errors, dropped }
+ */
+function parseLinkLines(text, guildId) {
+    const groups = [[]], errors = [];
+    String(text ?? '').split(/\r?\n/).forEach((raw, i) => {
+        const line = raw.trim();
+        if (!line) { if (groups[groups.length - 1].length) groups.push([]); return; }
+
+        const m = /^(.*?)\s*\|\s*(https?:\/\/\S+|<#\d{17,20}>|\d{17,20})\s*$/u.exec(line);
+        const url = m && resolveLinkTarget(m[2], guildId);
+        if (!url) { errors.push(`บรรทัด ${i + 1}: \`${line.slice(0, 40)}\` — ต้องเป็น \`ชื่อปุ่ม | ลิงก์/ไอดีห้อง\``); return; }
+
+        const { emoji, label } = splitLeadingEmoji(m[1]);
+        if (!label && !emoji) { errors.push(`บรรทัด ${i + 1}: \`${line.slice(0, 40)}\` — ไม่มีชื่อปุ่ม`); return; }
+        groups[groups.length - 1].push({ label: label.slice(0, 80), emoji, url });
+    });
+
+    let rows = [];
+    for (const g of groups) for (let i = 0; i < g.length; i += LINK_PER_ROW) rows.push(g.slice(i, i + LINK_PER_ROW));
+    const dropped = rows.slice(LINK_MAX_ROWS).reduce((n, r) => n + r.length, 0);
+    return { rows: rows.slice(0, LINK_MAX_ROWS), errors, dropped };
+}
+
+/** แปลงแถวปุ่มกลับเป็นข้อความ เพื่อเติมในหน้าแก้ไข */
+const linkRowsToText = (rows) =>
+    rows.map(r => r.map(b => `${b.emoji ? b.emoji + ' ' : ''}${b.label} | ${b.url}`).join('\n')).join('\n\n');
+
+const linkCount = (draft) => (draft?.linkRows ?? []).reduce((n, r) => n + r.length, 0);
+
+/** แถวปุ่มลิงก์ใต้ประกาศ (กดแล้วเด้งไปหน้านั้น) — ไม่มีปุ่ม = [] */
+function buildLinkRows(draft) {
+    return (draft?.linkRows ?? []).filter(r => r.length).map(r => new ActionRowBuilder().addComponents(
+        r.map(b => {
+            const btn = new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(b.url);
+            if (b.label) btn.setLabel(b.label);
+            const em = parseBtnEmoji(b.emoji);
+            if (em) btn.setEmoji(em);
+            return btn;
+        })
+    ));
 }
 
 function buildLinkModal(draft) {
-    // ยังไม่เคยตั้ง → เติมค่าเริ่มต้นจากปุ่มแรกของ STATUS_BUTTONS (ปุ่มเปิด Ticket) ให้แก้ต่อได้
-    const d   = STATUS_BUTTONS[0] || {};
-    const cur = draft.link || { label: d.label || '', emoji: (d.emoji || '').trim(), url: d.url || d.channelId || '' };
-    const field = (customId, label, value, max, placeholder) => {
-        const input = new TextInputBuilder().setCustomId(customId).setLabel(label).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(max);
-        if (value)       input.setValue(String(value).slice(0, max));
-        if (placeholder) input.setPlaceholder(placeholder.slice(0, 100));
-        return new ActionRowBuilder().addComponents(input);
-    };
+    // ยังไม่เคยตั้ง → เติมปุ่มแรกของ STATUS_BUTTONS (ปุ่มเปิด Ticket) ให้เป็นตัวอย่างรูปแบบ แก้/เพิ่ม/ลบได้เลย
+    const d = STATUS_BUTTONS[0] || {};
+    const value = draft.linkRows.length
+        ? linkRowsToText(draft.linkRows)
+        : (d.label && (d.url || d.channelId) ? `${(d.emoji || '').trim()} ${d.label} | ${d.url || d.channelId}`.trim() : '');
+    const input = new TextInputBuilder()
+        .setCustomId('links')
+        .setLabel('ปุ่มลิงก์ (1 บรรทัด = 1 ปุ่ม)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setMaxLength(4000)
+        .setPlaceholder('🎫 เปิด Ticket ซื้อของ | ไอดีห้อง หรือ https://...\n(เว้นบรรทัดว่าง = ขึ้นแถวใหม่ / ลบทั้งหมด = ไม่มีปุ่ม)');
+    if (value) input.setValue(value.slice(0, 4000));
     return new ModalBuilder()
         .setCustomId(`emb_linkmodal:${draft.ownerId}`)
         .setTitle('🔗 ปุ่มลิงก์ใต้ประกาศ')
-        .addComponents(
-            field('label', 'ชื่อปุ่ม (เว้นว่างทุกช่อง = ลบปุ่ม)', cur.label, 80,  'เช่น เปิด Ticket ซื้อของ'),
-            field('emoji', 'อีโมจิหน้าปุ่ม (ไม่ใส่ก็ได้)',        cur.emoji, 100, 'เช่น 🎫 หรือ <a:ชื่อ:ไอดี>'),
-            field('url',   'ลิงก์ หรือ ไอดีห้องที่จะพาไป',        cur.url,   500, 'https://... หรือ ไอดีห้อง / #ห้อง')
-        );
+        .addComponents(new ActionRowBuilder().addComponents(input));
 }
 
 function buildDraftEmbed(draft) {
@@ -1784,10 +1828,11 @@ function draftPayload(draft, notice = '') {
         content:
             `**${EMOJI.announce} ตัวอย่างประกาศ** → ` +
             (draft.channelId ? `<#${draft.channelId}>` : '*(ยังไม่ได้เลือกห้อง — เลือกจากเมนูด้านล่าง)*') +
+            (draft.linkRows.length > 2 ? `\n🔗 ปุ่มลิงก์ ${linkCount(draft)} ปุ่ม ${draft.linkRows.length} แถว (ตัวอย่างแสดงแค่ 2 แถวแรก — ตอนส่งจริงขึ้นครบ)` : '') +
             (notice ? `\n${notice}` : ''),
         embeds: [buildDraftEmbed(draft)],
         components: [
-            ...(buildLinkRow(draft) ? [buildLinkRow(draft)] : []),   // ตัวอย่างปุ่มลิงก์ (หน้าตาเหมือนตอนส่งจริง)
+            ...buildLinkRows(draft).slice(0, 2),   // ตัวอย่างปุ่มลิงก์ (หน้าตาเหมือนตอนส่งจริง · แผงควบคุมกินไปแล้ว 3 แถว เหลือโชว์ได้ 2 แถว)
             new ActionRowBuilder().addComponents(
                 new ChannelSelectMenuBuilder()
                     .setCustomId(`emb_chan:${o}`)
@@ -1889,27 +1934,16 @@ async function handleEmbedCreator(interaction) {
 
     // ── บันทึกปุ่มลิงก์ ──
     if (interaction.isModalSubmit() && action === 'emb_linkmodal') {
-        const get = (k) => interaction.fields.getTextInputValue(k).trim();
-        const label = get('label'), emojiRaw = get('emoji'), target = get('url');
+        const { rows, errors, dropped } = parseLinkLines(interaction.fields.getTextInputValue('links'), interaction.guildId);
+        const notices = [];
 
-        if (!label && !emojiRaw && !target) {                       // เว้นว่างหมด = ลบปุ่ม
-            draft.link = null;
-            await replyOrUpdate(interaction, draftPayload(draft, '🗑️ ลบปุ่มลิงก์แล้ว'));
-            return true;
-        }
+        draft.linkRows = rows;
+        const n = linkCount(draft);
+        notices.push(n ? `🔗 ตั้งปุ่มลิงก์แล้ว ${n} ปุ่ม` : '🗑️ ไม่มีปุ่มลิงก์');
+        if (dropped) notices.push(`⚠️ ดิสให้ใส่ได้สูงสุด ${LINK_MAX_ROWS * LINK_PER_ROW} ปุ่ม (${LINK_MAX_ROWS} แถว × ${LINK_PER_ROW}) — ตัดปุ่มที่เกินออก ${dropped} ปุ่ม`);
+        if (errors.length) notices.push('⚠️ ข้ามบรรทัดที่ผิดรูปแบบ:\n' + errors.slice(0, 5).join('\n') + (errors.length > 5 ? `\n…และอีก ${errors.length - 5} บรรทัด` : ''));
 
-        const url   = resolveLinkTarget(target, interaction.guildId);
-        const emoji = parseBtnEmoji(emojiRaw);
-        const errs  = [];
-        if (!url)                errs.push('⚠️ ลิงก์/ไอดีห้องไม่ถูกต้อง (ต้องขึ้นต้นด้วย https:// หรือเป็นไอดีห้อง)');
-        if (!label && !emojiRaw) errs.push('⚠️ ต้องมีชื่อปุ่มหรืออีโมจิอย่างน้อย 1 อย่าง');
-        if (emoji === null)      errs.push('⚠️ อีโมจิไม่ถูกต้อง — ใช้อีโมจิปกติ หรือ <:ชื่อ:ไอดี>');
-
-        if (errs.length) await replyOrUpdate(interaction, draftPayload(draft, errs.join('\n') + '\n(ยังไม่ได้เปลี่ยนปุ่มลิงก์)'));
-        else {
-            draft.link = { label, emoji: emojiRaw, url };
-            await replyOrUpdate(interaction, draftPayload(draft, '🔗 ตั้งปุ่มลิงก์แล้ว'));
-        }
+        await replyOrUpdate(interaction, draftPayload(draft, notices.join('\n')));
         return true;
     }
 
@@ -1947,8 +1981,8 @@ async function handleEmbedCreator(interaction) {
             embeds:          [buildDraftEmbed(draft)],
             allowedMentions: { roles: draft.ping === 'none' ? [] : [draft.ping] }
         };
-        const linkRow = buildLinkRow(draft);
-        if (linkRow) payload.components = [linkRow];
+        const linkRows = buildLinkRows(draft);
+        if (linkRows.length) payload.components = linkRows;
         const sticker = STICKERS[draft.key];
         if (sticker) payload.stickers = [sticker];
 
@@ -2041,7 +2075,7 @@ async function cmdHelp(message) {
             { name: '🛍️ ร้านค้า',  value: '`!setupshop` โพสต์แผงร้านค้า\n`!rate [buy|sell|farm|food|all]` อัปเดตเรทในห้องเรท (แก้ข้อความเดิม ไม่โพสต์ซ้ำ)' },
             { name: '📦 สต็อก',    value: '`!stockpanel` แผงเติม/ลด/ตั้งค่าสต็อก (ใช้ปุ่ม)\n`!addstock [food|buy] [item] [จำนวน]`\n`!delstock [food|buy] [item] [จำนวน]`\n`!clearallstock [food|buy]`' },
             { name: '💲 เรทราคา', value: '`!ratepanel` แผงแก้เรท/ลิมิตสินค้าในดิส (ไม่ต้องแตะโค้ด)' },
-            { name: '📢 ประกาศ (Embed)', value: '`!embed` เมนูเลือกหัวข้อ\n`!embed <คีย์ลัด> [#ห้อง]` เช่น `!embed stock #ประกาศ`\nกดปุ่ม 🔗 **ปุ่มลิงก์** ในหน้าตัวอย่างเพื่อใส่ปุ่มกดแล้วเด้งไปหน้า/ห้องที่ต้องการ' },
+            { name: '📢 ประกาศ (Embed)', value: '`!embed` เมนูเลือกหัวข้อ\n`!embed <คีย์ลัด> [#ห้อง]` เช่น `!embed stock #ประกาศ`\nกดปุ่ม 🔗 **ปุ่มลิงก์** ในหน้าตัวอย่างเพื่อใส่ปุ่มกดแล้วเด้งไปหน้า/ห้องที่ต้องการ (ใส่ได้หลายปุ่ม บรรทัดละปุ่ม)' },
             { name: '🟢 สถานะร้าน', value: '`!open` ประกาศเปิดร้าน\n`!close [ข้อความ]` ประกาศปิดร้าน เช่น `!close กลับมา 15:00`\n(ตั้งเวลาเปิด/ปิดอัตโนมัติที่ STATUS_OPEN_TIME / STATUS_CLOSE_TIME)' },
             { name: '🔑 คีย์ลัดประกาศ', value: tpl },
             { name: '🛠️ ออเดอร์', value: 'ในห้องออเดอร์: **รับงาน** → **เสร็จสิ้น** (ตัดสต็อก/คูลดาวน์) → **ปิดห้อง**' }
