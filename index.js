@@ -1694,7 +1694,8 @@ function createDraft(ownerId, key, vars = {}, channelId = null) {
         ownerId, key: EMBED_TEMPLATES[key] ? key : 'custom',
         title: t.title, description: t.description, color: t.color,
         image: '', footer: `${BRAND.name} • ประกาศ`,
-        ping: 'none', channelId, vars
+        ping: 'none', channelId, vars,
+        link: null          // ปุ่มลิงก์ใต้ประกาศ { label, emoji, url }  (null = ไม่มีปุ่ม)
     };
     embedDrafts.set(ownerId, draft);
     return draft;
@@ -1710,6 +1711,55 @@ function expandVars(text, draft) {
     for (const t of TYPES)       map[`rate_${t}`]  = rateLines(t);
     for (const t of STOCK_TYPES) map[`stock_${t}`] = stockLines(t);
     return String(text ?? '').replace(/\{(\w+)\}/g, (m, k) => (map[k] !== undefined ? map[k] : m));
+}
+
+/** อีโมจิปุ่ม: '' → undefined (ไม่มี) | อีโมจิดิส <:ชื่อ:id> / <a:ชื่อ:id> | อีโมจิปกติ 🎫 | ผิดรูปแบบ → null */
+function parseBtnEmoji(raw) {
+    const s = String(raw ?? '').trim();
+    if (!s) return undefined;
+    const custom = emojiObj(s);
+    if (custom) return custom;
+    const uni = /^\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/u.exec(s);
+    return uni ? uni[0] : null;
+}
+
+/** ลิงก์ปลายทางของปุ่ม: รับ https://... | ไอดีห้อง | <#ห้อง> → คืน URL (ผิดรูปแบบ = null) */
+function resolveLinkTarget(raw, guildId) {
+    const s = String(raw ?? '').trim();
+    if (/^https?:\/\/\S+$/i.test(s)) return s;
+    const id = /^<#(\d{17,20})>$/.exec(s)?.[1] || /^(\d{17,20})$/.exec(s)?.[1];
+    return id && guildId ? `https://discord.com/channels/${guildId}/${id}` : null;
+}
+
+/** แถวปุ่มลิงก์ใต้ประกาศ (กดแล้วเด้งไปหน้านั้น) — ไม่มีปุ่ม = null */
+function buildLinkRow(draft) {
+    const l = draft?.link;
+    if (!l?.url || (!l.label && !l.emoji)) return null;
+    const btn = new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(l.url);
+    if (l.label) btn.setLabel(l.label.slice(0, 80));
+    const em = parseBtnEmoji(l.emoji);
+    if (em) btn.setEmoji(em);
+    return new ActionRowBuilder().addComponents(btn);
+}
+
+function buildLinkModal(draft) {
+    // ยังไม่เคยตั้ง → เติมค่าเริ่มต้นจากปุ่มแรกของ STATUS_BUTTONS (ปุ่มเปิด Ticket) ให้แก้ต่อได้
+    const d   = STATUS_BUTTONS[0] || {};
+    const cur = draft.link || { label: d.label || '', emoji: (d.emoji || '').trim(), url: d.url || d.channelId || '' };
+    const field = (customId, label, value, max, placeholder) => {
+        const input = new TextInputBuilder().setCustomId(customId).setLabel(label).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(max);
+        if (value)       input.setValue(String(value).slice(0, max));
+        if (placeholder) input.setPlaceholder(placeholder.slice(0, 100));
+        return new ActionRowBuilder().addComponents(input);
+    };
+    return new ModalBuilder()
+        .setCustomId(`emb_linkmodal:${draft.ownerId}`)
+        .setTitle('🔗 ปุ่มลิงก์ใต้ประกาศ')
+        .addComponents(
+            field('label', 'ชื่อปุ่ม (เว้นว่างทุกช่อง = ลบปุ่ม)', cur.label, 80,  'เช่น เปิด Ticket ซื้อของ'),
+            field('emoji', 'อีโมจิหน้าปุ่ม (ไม่ใส่ก็ได้)',        cur.emoji, 100, 'เช่น 🎫 หรือ <a:ชื่อ:ไอดี>'),
+            field('url',   'ลิงก์ หรือ ไอดีห้องที่จะพาไป',        cur.url,   500, 'https://... หรือ ไอดีห้อง / #ห้อง')
+        );
 }
 
 function buildDraftEmbed(draft) {
@@ -1737,6 +1787,7 @@ function draftPayload(draft, notice = '') {
             (notice ? `\n${notice}` : ''),
         embeds: [buildDraftEmbed(draft)],
         components: [
+            ...(buildLinkRow(draft) ? [buildLinkRow(draft)] : []),   // ตัวอย่างปุ่มลิงก์ (หน้าตาเหมือนตอนส่งจริง)
             new ActionRowBuilder().addComponents(
                 new ChannelSelectMenuBuilder()
                     .setCustomId(`emb_chan:${o}`)
@@ -1754,6 +1805,7 @@ function draftPayload(draft, notice = '') {
             new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`emb_send:${o}`).setLabel('ส่งประกาศ').setEmoji(EMOJI.ok).setStyle(ButtonStyle.Success).setDisabled(!draft.channelId),
                 new ButtonBuilder().setCustomId(`emb_edit:${o}`).setLabel('แก้ไข').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`emb_link:${o}`).setLabel('ปุ่มลิงก์').setEmoji('🔗').setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder().setCustomId(`emb_cancel:${o}`).setLabel('ยกเลิก').setEmoji(EMOJI.no).setStyle(ButtonStyle.Danger)
             )
         ]
@@ -1835,6 +1887,32 @@ async function handleEmbedCreator(interaction) {
         return true;
     }
 
+    // ── บันทึกปุ่มลิงก์ ──
+    if (interaction.isModalSubmit() && action === 'emb_linkmodal') {
+        const get = (k) => interaction.fields.getTextInputValue(k).trim();
+        const label = get('label'), emojiRaw = get('emoji'), target = get('url');
+
+        if (!label && !emojiRaw && !target) {                       // เว้นว่างหมด = ลบปุ่ม
+            draft.link = null;
+            await replyOrUpdate(interaction, draftPayload(draft, '🗑️ ลบปุ่มลิงก์แล้ว'));
+            return true;
+        }
+
+        const url   = resolveLinkTarget(target, interaction.guildId);
+        const emoji = parseBtnEmoji(emojiRaw);
+        const errs  = [];
+        if (!url)                errs.push('⚠️ ลิงก์/ไอดีห้องไม่ถูกต้อง (ต้องขึ้นต้นด้วย https:// หรือเป็นไอดีห้อง)');
+        if (!label && !emojiRaw) errs.push('⚠️ ต้องมีชื่อปุ่มหรืออีโมจิอย่างน้อย 1 อย่าง');
+        if (emoji === null)      errs.push('⚠️ อีโมจิไม่ถูกต้อง — ใช้อีโมจิปกติ หรือ <:ชื่อ:ไอดี>');
+
+        if (errs.length) await replyOrUpdate(interaction, draftPayload(draft, errs.join('\n') + '\n(ยังไม่ได้เปลี่ยนปุ่มลิงก์)'));
+        else {
+            draft.link = { label, emoji: emojiRaw, url };
+            await replyOrUpdate(interaction, draftPayload(draft, '🔗 ตั้งปุ่มลิงก์แล้ว'));
+        }
+        return true;
+    }
+
     if (interaction.isStringSelectMenu() && action === 'emb_ping') {
         draft.ping = interaction.values[0];
         await interaction.update(draftPayload(draft));
@@ -1844,6 +1922,7 @@ async function handleEmbedCreator(interaction) {
     if (!interaction.isButton()) return false;
 
     if (action === 'emb_edit') { await interaction.showModal(buildEditModal(draft)); return true; }
+    if (action === 'emb_link') { await interaction.showModal(buildLinkModal(draft)); return true; }
 
     if (action === 'emb_cancel') {
         embedDrafts.delete(uid);
@@ -1868,6 +1947,8 @@ async function handleEmbedCreator(interaction) {
             embeds:          [buildDraftEmbed(draft)],
             allowedMentions: { roles: draft.ping === 'none' ? [] : [draft.ping] }
         };
+        const linkRow = buildLinkRow(draft);
+        if (linkRow) payload.components = [linkRow];
         const sticker = STICKERS[draft.key];
         if (sticker) payload.stickers = [sticker];
 
@@ -1960,7 +2041,7 @@ async function cmdHelp(message) {
             { name: '🛍️ ร้านค้า',  value: '`!setupshop` โพสต์แผงร้านค้า\n`!rate [buy|sell|farm|food|all]` อัปเดตเรทในห้องเรท (แก้ข้อความเดิม ไม่โพสต์ซ้ำ)' },
             { name: '📦 สต็อก',    value: '`!stockpanel` แผงเติม/ลด/ตั้งค่าสต็อก (ใช้ปุ่ม)\n`!addstock [food|buy] [item] [จำนวน]`\n`!delstock [food|buy] [item] [จำนวน]`\n`!clearallstock [food|buy]`' },
             { name: '💲 เรทราคา', value: '`!ratepanel` แผงแก้เรท/ลิมิตสินค้าในดิส (ไม่ต้องแตะโค้ด)' },
-            { name: '📢 ประกาศ (Embed)', value: '`!embed` เมนูเลือกหัวข้อ\n`!embed <คีย์ลัด> [#ห้อง]` เช่น `!embed stock #ประกาศ`' },
+            { name: '📢 ประกาศ (Embed)', value: '`!embed` เมนูเลือกหัวข้อ\n`!embed <คีย์ลัด> [#ห้อง]` เช่น `!embed stock #ประกาศ`\nกดปุ่ม 🔗 **ปุ่มลิงก์** ในหน้าตัวอย่างเพื่อใส่ปุ่มกดแล้วเด้งไปหน้า/ห้องที่ต้องการ' },
             { name: '🟢 สถานะร้าน', value: '`!open` ประกาศเปิดร้าน\n`!close [ข้อความ]` ประกาศปิดร้าน เช่น `!close กลับมา 15:00`\n(ตั้งเวลาเปิด/ปิดอัตโนมัติที่ STATUS_OPEN_TIME / STATUS_CLOSE_TIME)' },
             { name: '🔑 คีย์ลัดประกาศ', value: tpl },
             { name: '🛠️ ออเดอร์', value: 'ในห้องออเดอร์: **รับงาน** → **เสร็จสิ้น** (ตัดสต็อก/คูลดาวน์) → **ปิดห้อง**' }
