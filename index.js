@@ -22,7 +22,6 @@ const {
 const fs    = require('fs');
 const axios = require('axios');
 const { URL } = require('url');
-const { url } = require('inspector');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
@@ -1798,7 +1797,7 @@ function buildLinkModal(draft) {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false)
         .setMaxLength(4000)
-        .setPlaceholder('🎫 เปิด Ticket ซื้อของ | ไอดีห้อง หรือ https://...\n(เว้นบรรทัดว่าง = ขึ้นแถวใหม่ / ลบทั้งหมด = ไม่มีปุ่ม)');
+        .setPlaceholder('🎫 ชื่อปุ่ม | ไอดีห้อง หรือ https://...\n(เว้นบรรทัดว่าง = ขึ้นแถวใหม่)'.slice(0, 100));
     if (value) input.setValue(value.slice(0, 4000));
     return new ModalBuilder()
         .setCustomId(`emb_linkmodal:${draft.ownerId}`)
@@ -2324,12 +2323,16 @@ async function postStatus(isOpen, chan, note = '') {
     }
 
     const row = new ActionRowBuilder();
-for (const b of STATUS_BUTTONS) {
-    if (!b.channelId && !b.url) continue;   // ไม่มีทั้งห้องและลิงก์ = ไม่แสดงปุ่ม
-    row.addComponents(new ButtonBuilder()
-        .setLabel(b.label).setEmoji(b.emoji).setStyle(ButtonStyle.Link)
-        .setURL(b.url || `https://discord.com/channels/${chan.guild.id}/${b.channelId}`));
-}
+    for (const b of STATUS_BUTTONS) {
+        // ลิงก์ปลายทาง: ใช้ url ถ้ามี ไม่งั้นสร้างจากไอดีห้อง (trim กันช่องว่างหลุดมา)
+        const target = String(b.url || '').trim() ||
+            (b.channelId ? `https://discord.com/channels/${chan.guild.id}/${String(b.channelId).trim()}` : '');
+        if (!/^https?:\/\/\S+$/i.test(target)) continue;   // ไม่มีลิงก์ที่ใช้ได้ = ไม่แสดงปุ่ม
+
+        const btn = new ButtonBuilder().setLabel(b.label).setStyle(ButtonStyle.Link).setURL(target);
+        withEmoji(btn, (b.emoji || '').trim());           // แปลงอีโมจิเป็น object + ตัดช่องว่างท้ายสตริง
+        row.addComponents(btn);
+    }
 
     // ลบประกาศสถานะอันเก่า
     if (statusState.messageId && statusState.channelId) {
