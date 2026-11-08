@@ -19,6 +19,8 @@ const {
     ButtonBuilder, ButtonStyle, MessageFlags
 } = require('discord.js');
 
+const fs = require('fs');
+
 const EPHEMERAL = MessageFlags.Ephemeral;
 
 // ==========================================
@@ -40,6 +42,35 @@ const STICKERS = {
 };
 
 // ==========================================
+// [ 3.3 STATUS — ประกาศ เปิด/ปิดร้าน ]
+// ==========================================
+const STATUS_CHANNEL_ID   = '1554881839422906494';          // ← ใส่ ID ห้องประกาศสถานะร้าน (ไม่ใส่ = ส่งในห้องที่พิมพ์คำสั่ง/กดปุ่ม)
+const STATUS_BANNER_OPEN  = 'https://cdn.discordapp.com/attachments/1558800783133249708/1562512859433533595/IMG_9599.gif?ex=6ada42ff&is=6ad8f17f&hm=2ff2541a53821a6eefc5d0a93e45fc6f3a4246e9dce73ab9ccddeb7fb5050694&';          // ← ลิงก์รูปแบนเนอร์ "เปิดร้าน" (ว่าง = ไม่มีรูป)
+const STATUS_BANNER_CLOSE = 'https://cdn.discordapp.com/attachments/1558800783133249708/1562512859018301500/IMG_9600.gif?ex=6ada42ff&is=6ad8f17f&hm=d04988008e0ccbedad9b1b485d3f790fb06dd04c5e8575dd26bf1a2daedd9239&';          // ← ลิงก์รูปแบนเนอร์ "ปิดร้าน"
+const STATUS_OPEN_TIME    = '09:00';     // เวลาเปิดร้าน (แสดงในข้อความประกาศเท่านั้น ไม่ได้ตั้งเวลาอัตโนมัติ)
+const STATUS_CLOSE_TIME   = '00:30';     // เวลาปิดร้าน (แสดงในข้อความประกาศเท่านั้น)
+const STATUS_COLOR_OPEN  = '#00FF66';   // สีเส้นข้าง embed ตอนร้านเปิด
+const STATUS_COLOR_CLOSE = '#FF3B3B';   // สีเส้นข้าง embed ตอนร้านปิด
+const STATUS_FILE         = './status_state.json';
+
+// เปลี่ยนชื่อห้องสถานะตอนเปิด/ปิดร้าน (บอทต้องมีสิทธิ์ Manage Channels ที่ห้องนั้น)
+const STATUS_RENAME       = true;
+const STATUS_NAME_OPEN    = '│﹒สถานะร้าน-𝑶𝑷𝑬𝑵🟢';
+const STATUS_NAME_CLOSE   = '│﹒สถานะร้าน-𝑪𝑳𝑶𝑺𝑬🔴';
+
+// ปุ่มลิงก์ใต้ประกาศ — ใส่ ID ห้องที่ต้องการให้กดแล้วพาไป (ช่อง channelId ว่าง = ไม่แสดงปุ่มนั้น)
+const STATUS_BUTTONS = [
+    { label: 'เปิด Ticket ซื้อของ', emoji: '<a:1271420570311069759:1562679699489034331> ', channelId: '1554881839422906496' },   // ห้องที่มีแผงร้านค้า (!setupshop)
+    { label: 'ดูตัวอย่าง',          emoji: '<a:1439855196799766681:1562681121278263326> ', url: 'https://discord.com/shop' },
+    { label: 'ดูเรทราคา',           emoji: '<a:nitroboost:1557406666482384940> ', channelId: '1554881839422906497' }
+];
+
+// open = สถานะล่าสุดที่ประกาศ (true = เปิด / false = ปิด / null = ยังไม่เคยประกาศ)
+let statusState = { messageId: null, channelId: null, open: null };
+try { if (fs.existsSync(STATUS_FILE)) statusState = { ...statusState, ...JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8')) }; } catch {}
+const saveStatus = () => { try { fs.writeFileSync(STATUS_FILE, JSON.stringify(statusState, null, 2)); } catch (e) { console.error('save status:', e); } };
+
+// ==========================================
 // [ 4. Runtime State ]
 // ==========================================
 const embedDrafts  = new Map();   // userId -> draft ของตัวสร้างประกาศ
@@ -56,6 +87,12 @@ const tell    = (interaction, content) => interaction.reply({ content, flags: EP
 const emojiObj = (s) => {
     const m = /<(a?):(\w+):(\d+)>/.exec(s || '');
     return m ? { animated: !!m[1], name: m[2], id: m[3] } : undefined;
+};
+
+// ใส่อีโมจิให้ปุ่มเฉพาะเมื่อมีค่า (รับได้ทั้งสตริงและ {id,name})
+const withEmoji = (btn, e) => {
+    const em = typeof e === 'string' ? emojiObj(e) : (e?.id ? e : undefined);
+    return em ? btn.setEmoji(em) : btn;
 };
 
 // ถ้า modal เปิดมาจากปุ่ม/เมนู → แก้ข้อความเดิม (ไม่เด้งข้อความซ้อน) ไม่งั้นตอบใหม่แบบ ephemeral
@@ -467,6 +504,10 @@ client.on('messageCreate', async (message) => {
             case '!adminhelp':
             case '!help':  return await cmdHelp(message);
             case '!embed': return await cmdEmbed(message, args);
+            case '!open':  return await cmdStatus(message, true, args);
+            case '!close': return await cmdStatus(message, false, args);
+            case '!statuspanel':
+            case '!setupstatus': return await cmdStatusPanel(message);
         }
     } catch (err) {
         console.error('❌ Command Error:', err);
@@ -481,6 +522,7 @@ async function cmdHelp(message) {
         .setColor(BRAND.color)
         .addFields(
             { name: '📢 ประกาศ (Embed)', value: '`!embed` เมนูเลือกหัวข้อ\n`!embed <คีย์ลัด> [#ห้อง]` เช่น `!embed notice #ประกาศ`\nกดปุ่ม 🔗 **ปุ่มลิงก์** ในหน้าตัวอย่างเพื่อใส่ปุ่มกดแล้วเด้งไปหน้า/ห้องที่ต้องการ (ใส่ได้หลายปุ่ม บรรทัดละปุ่ม)' },
+            { name: '🟢 สถานะร้าน', value: '`!statuspanel` โพสต์แผงปุ่ม เปิดร้าน / ปิดร้าน (กดแล้วสลับสถานะ ลบประกาศเก่า ส่งประกาศใหม่)\n`!open` / `!close [ข้อความ]` ใช้พิมพ์สั่งตรง ๆ ได้เหมือนกัน เช่น `!close กลับมา 15:00`' },
             { name: '🔑 คีย์ลัดประกาศ', value: tpl }
         )] });
 }
@@ -521,12 +563,191 @@ async function cmdEmbed(message, args) {
 }
 
 // ==========================================
+// [ 14.1 STATUS — เปิด/ปิดร้าน ]
+// ==========================================
+/** แปลง embed สถานะเป็นกล่อง Components V2 — รูปใหญ่บนสุด, หัวข้อใหญ่, ปุ่มอยู่ในกล่องใต้เส้นคั่น */
+function buildStatusMessage(embed, banner, row) {
+    const D = require('discord.js');
+    const hasButtons = row.components.length > 0;
+    const hasV2 = D.ContainerBuilder && D.MediaGalleryBuilder && D.MediaGalleryItemBuilder
+        && D.TextDisplayBuilder && D.SeparatorBuilder && D.MessageFlags && D.MessageFlags.IsComponentsV2;
+    if (!hasV2) return { embeds: [embed], components: hasButtons ? [row] : [] };   // discord.js เก่าไป → ใช้ embed เดิม
+
+    // บรรทัดแรก (ตัวหนา) ทำเป็นหัวข้อรอง ที่เหลือเป็นข้อความตัวเล็ก
+    const [first, ...rest] = String(embed.data.description || '').split('\n');
+    const headline = first.replace(/\*\*/g, '').trim();
+    const body = rest.join('\n').trim();
+
+    const sep = () => new D.SeparatorBuilder().setDivider(true).setSpacing(D.SeparatorSpacingSize.Small);
+    const container = new D.ContainerBuilder();
+    if (embed.data.color != null) container.setAccentColor(embed.data.color);
+
+    if (banner) {
+        container.addMediaGalleryComponents(
+            new D.MediaGalleryBuilder().addItems(new D.MediaGalleryItemBuilder().setURL(banner))
+        );
+    }
+    container.addSeparatorComponents(sep());
+    container.addTextDisplayComponents(
+        new D.TextDisplayBuilder().setContent(`## ${embed.data.title}\n### ${headline}${body ? `\n${body}` : ''}`)
+    );
+    if (hasButtons) {
+        container.addSeparatorComponents(sep());
+        container.addActionRowComponents(row);
+    }
+    return { components: [container], flags: D.MessageFlags.IsComponentsV2 };
+}
+
+/** ส่งประกาศสถานะร้าน (ลบอันเก่าออกก่อน ห้องจะมีประกาศล่าสุดอันเดียว) + เปลี่ยนชื่อห้องสถานะ */
+async function postStatus(isOpen, chan, note = '') {
+    const hours = `${STATUS_OPEN_TIME}-${STATUS_CLOSE_TIME}`;
+    const embed = new EmbedBuilder().setColor(isOpen ? STATUS_COLOR_OPEN : STATUS_COLOR_CLOSE);
+    const banner = isOpen ? STATUS_BANNER_OPEN : STATUS_BANNER_CLOSE;
+    if (banner) embed.setImage(banner);
+
+    if (isOpen) {
+        embed.setTitle('<a:1494640282170556607:1562510690780975134>  ร้านเปิดให้บริการแล้วครับ')
+            .setDescription(
+                `**เปิด Ticket ซื้อของ หรือ สอบถาม มาได้เลย 🎁**\n` +
+                `> เปิดร้าน ${hours} ของทุกวัน\n> ขอบคุณที่ไว้วางใจและใช้บริการกับทางร้าน 🥰`
+            );
+    } else {
+        embed.setTitle('<a:1494640238822428702:1562510708246061188>  ร้านปิดให้บริการชั่วคราวครับ')
+            .setDescription(
+                `**ทิ้งข้อความไว้ได้เลย เปิดร้านแล้วจะรีบตอบนะครับ 🙏**\n` +
+                (note ? `> ${note}\n` : '') +
+                `> เวลาเปิดร้าน ${hours} ของทุกวัน`
+            );
+    }
+
+    const row = new ActionRowBuilder();
+    for (const b of STATUS_BUTTONS) {
+        // ลิงก์ปลายทาง: ใช้ url ถ้ามี ไม่งั้นสร้างจากไอดีห้อง (trim กันช่องว่างหลุดมา)
+        const target = String(b.url || '').trim() ||
+            (b.channelId ? `https://discord.com/channels/${chan.guild.id}/${String(b.channelId).trim()}` : '');
+        if (!/^https?:\/\/\S+$/i.test(target)) continue;   // ไม่มีลิงก์ที่ใช้ได้ = ไม่แสดงปุ่ม
+
+        const btn = new ButtonBuilder().setLabel(b.label).setStyle(ButtonStyle.Link).setURL(target);
+        withEmoji(btn, (b.emoji || '').trim());           // แปลงอีโมจิเป็น object + ตัดช่องว่างท้ายสตริง
+        row.addComponents(btn);
+    }
+
+    // ลบประกาศสถานะอันเก่า
+    if (statusState.messageId && statusState.channelId) {
+        const oldCh  = await client.channels.fetch(statusState.channelId).catch(() => null);
+        const oldMsg = oldCh ? await oldCh.messages.fetch(statusState.messageId).catch(() => null) : null;
+        if (oldMsg) await oldMsg.delete().catch(() => {});
+    }
+
+    const sent = await chan.send(buildStatusMessage(embed, banner, row));
+    statusState.messageId = sent.id;
+    statusState.channelId = chan.id;
+    statusState.open      = isOpen;
+    saveStatus();
+
+    // เปลี่ยนชื่อห้องสถานะตาม เปิด/ปิด (ดิสจำกัดเปลี่ยนชื่อห้อง 2 ครั้ง/10 นาที เลยไม่ await กันประกาศค้าง)
+    if (STATUS_RENAME && STATUS_CHANNEL_ID && chan.id === STATUS_CHANNEL_ID) {
+        const name = isOpen ? STATUS_NAME_OPEN : STATUS_NAME_CLOSE;
+        if (chan.name !== name)
+            chan.setName(name, isOpen ? 'เปิดร้าน' : 'ปิดร้าน')
+                .catch(e => console.error('❌ เปลี่ยนชื่อห้องสถานะไม่ได้ (ตรวจสิทธิ์ Manage Channels):', e.message));
+    }
+    return sent;
+}
+
+/** ห้องประกาศสถานะ: STATUS_CHANNEL_ID ถ้ามี ไม่งั้นใช้ห้องที่สั่งคำสั่ง/กดปุ่ม */
+const getStatusChannel = (fallback) =>
+    STATUS_CHANNEL_ID ? client.channels.fetch(STATUS_CHANNEL_ID).catch(() => null) : Promise.resolve(fallback);
+
+// !open  /  !close [ข้อความเพิ่มเติม เช่น กลับมา 15:00]
+async function cmdStatus(message, isOpen, args) {
+    const chan = await getStatusChannel(message.channel);
+    if (!chan) return message.reply('❌ หาห้องประกาศสถานะไม่เจอ ตรวจ `STATUS_CHANNEL_ID` ในโค้ด');
+    await postStatus(isOpen, chan, args.join(' ').trim());
+    return message.reply(`${isOpen ? '🟢 ประกาศเปิดร้านแล้ว' : '🔴 ประกาศปิดร้านแล้ว'} → <#${chan.id}>`);
+}
+
+// ------------------------------------------
+// แผงปุ่มเปิด/ปิดร้าน  (!statuspanel) — กดแล้วสลับสถานะ ลบประกาศเก่า ส่งประกาศใหม่ เปลี่ยนชื่อห้อง
+// ------------------------------------------
+const statusLabel = () =>
+    statusState.open === true  ? '🟢 **เปิดอยู่**' :
+    statusState.open === false ? '🔴 **ปิดอยู่**'  : '⚪ *ยังไม่เคยประกาศ*';
+
+function statusPanelPayload(notice = '') {
+    const embed = new EmbedBuilder()
+        .setTitle('🏪 แผงควบคุมสถานะร้าน')
+        .setColor(statusState.open === false ? STATUS_COLOR_CLOSE : STATUS_COLOR_OPEN)
+        .setDescription(
+            `สถานะตอนนี้: ${statusLabel()}\n\n` +
+            `🟢 **เปิดร้าน** — ประกาศเปิดร้าน ลบประกาศเก่า และเปลี่ยนชื่อห้อง\n` +
+            `🔴 **ปิดร้าน** — ประกาศปิดร้านแบบเดียวกัน\n` +
+            `📝 **ปิดร้าน + หมายเหตุ** — ปิดร้านพร้อมข้อความ เช่น กลับมา 15:00\n\n` +
+            `📍 ห้องประกาศ: ${STATUS_CHANNEL_ID ? `<#${STATUS_CHANNEL_ID}>` : '*(ห้องที่กดปุ่ม)*'}\n` +
+            `🔒 ใช้ได้เฉพาะแอดมิน` + (notice ? `\n\n${notice}` : '')
+        )
+        .setFooter({ text: `${BRAND.name} • Shop Status` });
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('st_open').setLabel('เปิดร้าน').setEmoji('🟢').setStyle(ButtonStyle.Success).setDisabled(statusState.open === true),
+        new ButtonBuilder().setCustomId('st_close').setLabel('ปิดร้าน').setEmoji('🔴').setStyle(ButtonStyle.Danger).setDisabled(statusState.open === false),
+        new ButtonBuilder().setCustomId('st_closenote').setLabel('ปิดร้าน + หมายเหตุ').setEmoji('📝').setStyle(ButtonStyle.Secondary).setDisabled(statusState.open === false)
+    );
+    return { embeds: [embed], components: [row] };
+}
+
+async function cmdStatusPanel(message) {
+    return message.channel.send(statusPanelPayload());
+}
+
+async function handleStatusPanel(interaction) {
+    const id = interaction.customId;
+    if (!id.startsWith('st_')) return false;
+    if (!isAdmin(interaction.member)) { await tell(interaction, '❌ เฉพาะแอดมินเท่านั้น'); return true; }
+
+    // ปิดพร้อมหมายเหตุ → เปิดหน้ากรอก
+    if (interaction.isButton() && id === 'st_closenote') {
+        const input = new TextInputBuilder()
+            .setCustomId('note').setLabel('หมายเหตุ (ไม่ใส่ก็ได้)')
+            .setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100)
+            .setPlaceholder('เช่น กลับมา 15:00');
+        await interaction.showModal(new ModalBuilder()
+            .setCustomId('st_modal').setTitle('🔴 ปิดร้าน')
+            .addComponents(new ActionRowBuilder().addComponents(input)));
+        return true;
+    }
+
+    let isOpen, note = '';
+    if (interaction.isButton() && (id === 'st_open' || id === 'st_close')) isOpen = id === 'st_open';
+    else if (interaction.isModalSubmit() && id === 'st_modal') { isOpen = false; note = interaction.fields.getTextInputValue('note').trim(); }
+    else return false;
+
+    // แผงเก่าค้าง (สถานะเปลี่ยนไปแล้วจากที่อื่น) → แค่รีเฟรชแผง ไม่ประกาศซ้ำ
+    if (statusState.open === isOpen) {
+        await interaction.update(statusPanelPayload('ℹ️ สถานะเป็นแบบนี้อยู่แล้ว — รีเฟรชแผงให้แล้ว'));
+        return true;
+    }
+
+    await interaction.deferUpdate();
+    const chan = await getStatusChannel(interaction.channel);
+    if (!chan) {
+        await interaction.editReply(statusPanelPayload('❌ หาห้องประกาศสถานะไม่เจอ ตรวจ `STATUS_CHANNEL_ID` ในโค้ด'));
+        return true;
+    }
+    const sent = await postStatus(isOpen, chan, note);
+    await interaction.editReply(statusPanelPayload(`${isOpen ? '🟢 ประกาศเปิดร้านแล้ว' : '🔴 ประกาศปิดร้านแล้ว'} → ${sent.url}`));
+    return true;
+}
+
+// ==========================================
 // [ 15. INTERACTION ROUTER ]
 // ==========================================
 client.on('interactionCreate', async (interaction) => {
     await safeExecute(interaction, async () => {
         if (!interaction.customId) return;
-        await handleEmbedCreator(interaction);
+        for (const handler of [handleStatusPanel, handleEmbedCreator]) {
+            if (await handler(interaction)) return;
+        }
     });
 });
 
